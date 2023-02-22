@@ -1,0 +1,16 @@
+# application.yml
+spring:
+  profiles:
+    active: local
+
+---
+
+spring:
+  config:
+    activate:
+      on-profile: local
+
+server:
+  port: 8080
+
+my-secret: local?????.
