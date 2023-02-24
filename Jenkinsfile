@@ -24,6 +24,14 @@ pipeline {
                     DOCKER_HUB_FULL_URL = 'https://' + DOCKER_HUB_URL
                     DOCKER_HUB_CREDENTIAL_ID = 'DOCKER_HUB_CREDENTIAL'
                     DOCKER_IMAGE_NAME =  OPERATION_ENV + '-' + PROJECT_NAME
+
+                    // SSH
+                    SSH_CREDENTIAL_ID = OPERATION_ENV.toUpperCase() + '_SSH'
+                    SSH_PORT_CREDENTIAL_ID = OPERATION_ENV.toUpperCase() + '_SSH_PORT'
+                    SSH_HOST_CREDENTIAL_ID = OPERATION_ENV.toUpperCase() + '_SSH_HOST'
+
+                    // PORT
+                    PORT_PROPERTIES_FILE = 'application-' + OPERATION_ENV + '.yml'
                 }
             }
         }
@@ -42,6 +50,15 @@ pipeline {
             sh(script:
                 ('gpg --batch --import ' + GPG_SECRET_KEY + ' && '
                 + ' git secret reveal -f'))
+            }
+        }
+
+        stage('Parse Internal Port') {
+            steps {
+                script {
+                    INTERNAL_PORT = sh(script: "yq e '.server.port' ./src/main/resources/${PORT_PROPERTIES_FILE}"
+                        , returnStdout: true).trim();
+                }
             }
         }
 
@@ -75,6 +92,46 @@ pipeline {
                         --filter \"before=${DOCKER_HUB_ID}/${DOCKER_IMAGE_NAME}:latest\" \
                         ${DOCKER_HUB_URL}/${DOCKER_HUB_ID}/${DOCKER_IMAGE_NAME})
                     """, returnStatus: true)
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Server') {
+            steps {
+                echo 'Deploy to Server'
+                withCredentials([
+                    usernamePassword(credentialsId: DOCKER_HUB_CREDENTIAL_ID,
+                                        usernameVariable: 'DOCKER_HUB_ID',
+                                        passwordVariable: 'DOCKER_HUB_PW'),
+                    sshUserPrivateKey(credentialsId: SSH_CREDENTIAL_ID,
+                                        keyFileVariable: 'KEY_FILE',
+                                        passphraseVariable: 'PW',
+                                        usernameVariable: 'USERNAME'),
+                    string(credentialsId: SSH_HOST_CREDENTIAL_ID, variable: 'HOST'),
+                    string(credentialsId: SSH_PORT_CREDENTIAL_ID, variable: 'PORT')]) {
+
+                    script {
+                        def remote = [:]
+                        remote.name = OPERATION_ENV
+                        remote.host = HOST
+                        remote.user = USERNAME
+                        remote.password = PW
+                        // remote.identity = KEY_FILE
+                        remote.port = PORT as Integer
+                        remote.allowAnyHosts = true
+
+                        sshCommand remote: remote, command:
+                            'docker pull ' + DOCKER_HUB_ID + '/' + DOCKER_IMAGE_NAME + ":latest"
+
+                        sshCommand (remote: remote, failOnError: false,
+                        command: 'docker rm -f springboot')
+
+                        sshCommand remote: remote, command:
+                            ('docker run -d --name springboot'
+                            + ' -p 80:' + INTERNAL_PORT
+                            + ' -e \"SPRING_PROFILES_ACTIVE=' + OPERATION_ENV + '\"'
+                            + ' ' + DOCKER_HUB_ID + '/' + DOCKER_IMAGE_NAME + ':latest')
                     }
                 }
             }
