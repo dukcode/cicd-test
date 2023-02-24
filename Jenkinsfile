@@ -4,6 +4,10 @@ pipeline {
 
     environment {
         GPG_SECRET_KEY = credentials('GPG_SECRET_KEY')
+
+        // PORT
+        EXTERNAL_PORT_BLUE = credentials('EXTERNAL_PORT_BLUE')
+        EXTERNAL_PORT_GREEN = credentials('EXTERNAL_PORT_GREEN')
     }
 
     stages {
@@ -124,14 +128,17 @@ pipeline {
                         sshCommand remote: remote, command:
                             'docker pull ' + DOCKER_HUB_ID + '/' + DOCKER_IMAGE_NAME + ":latest"
 
-                        sshCommand (remote: remote, failOnError: false,
-                        command: 'docker rm -f springboot')
+                        sshPut remote: remote, from: './deploy.sh', into: '.'
+                        sshPut remote: remote, from: './nginx.conf', into: '.'
 
                         sshCommand remote: remote, command:
-                            ('docker run -d --name springboot'
-                            + ' -p 80:' + INTERNAL_PORT
-                            + ' -e \"SPRING_PROFILES_ACTIVE=' + OPERATION_ENV + '\"'
-                            + ' ' + DOCKER_HUB_ID + '/' + DOCKER_IMAGE_NAME + ':latest')
+                            ('export OPERATION_ENV=' + OPERATION_ENV + ' && '
+                            + 'export INTERNAL_PORT=' + INTERNAL_PORT + ' && '
+                            + 'export EXTERNAL_PORT_GREEN=' + EXTERNAL_PORT_GREEN + ' && '
+                            + 'export EXTERNAL_PORT_BLUE=' + EXTERNAL_PORT_BLUE + ' && '
+                            + 'export DOCKER_IMAGE_NAME=' + DOCKER_HUB_ID + '/' + DOCKER_IMAGE_NAME + ' && '
+                            + 'chmod +x deploy.sh && '
+                            + './deploy.sh')
                     }
                 }
             }
